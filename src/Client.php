@@ -4,6 +4,9 @@ namespace Claude\Claude3Api;
 
 use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\Exception\RequestException;
+use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Middleware;
+use Psr\Http\Message\ResponseInterface;
 use Claude\Claude3Api\Exceptions\ApiException;
 use Claude\Claude3Api\Models\Content\ImageContent;
 use Claude\Claude3Api\Models\Content\TextContent;
@@ -13,10 +16,17 @@ use Claude\Claude3Api\Responses\MessageResponse;
 
 class Client
 {
-    private HttpClient $httpClient;
+    protected HttpClient $httpClient;
 
-    public function __construct(private Config $config)
+    /**
+     * 响应回调函数
+     */
+    protected $responseCallback = null;
+
+    public function __construct(protected Config $config, ?callable $responseCallback = null)
     {
+        $this->responseCallback = $responseCallback;
+
         $headers = [
             'Content-Type' => 'application/json',
             'anthropic-version' => $this->config->getApiVersion(),
@@ -40,9 +50,24 @@ class Client
             $headers['Authorization'] = 'Bearer ' . $this->config->getApiKey();
         }
 
-        $this->httpClient = new HttpClient([
+        // 创建客户端配置
+        $clientConfig = [
             'headers' => $headers,
-        ]);
+        ];
+
+        // 如果提供了响应回调，则添加中间件
+        if ($this->responseCallback !== null) {
+            $stack = HandlerStack::create();
+            $stack->push(Middleware::mapResponse(function (ResponseInterface $response) {
+                if ($this->responseCallback) {
+                    call_user_func($this->responseCallback, $response);
+                }
+                return $response;
+            }));
+            $clientConfig['handler'] = $stack;
+        }
+
+        $this->httpClient = new HttpClient($clientConfig);
     }
 
     private function formatRequest(array|string $request): MessageRequest
